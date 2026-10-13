@@ -56,16 +56,21 @@ Deno.serve(async (req) => {
     const target = safeUrl(String(body.url || ""));
     if (!target) return json({ error: "bad_url" }, 400);
 
-    // 1) the page itself, 2) Shopify's product JSON, 3) a public reader service for sites that block servers.
-    let html = "", finalUrl = target.toString(), via = "direct", lastErr = "";
-    try {
+    // The browser button sends the page as the shopper sees it; then nothing needs fetching here.
+    const clientHtml = typeof body.html === "string" && body.html.length > 200 ? body.html.slice(0, 3e6) : "";
+    const clientShop = clientHtml && body.shop && typeof body.shop === "object" && !Array.isArray(body.shop) ? body.shop as Record<string, unknown> : null;
+    const clientImgs: string[] = Array.isArray(body.imgs) ? body.imgs.filter((x: unknown) => typeof x === "string").slice(0, 20) : [];
+
+    // Otherwise: 1) the page itself, 2) Shopify's product JSON, 3) a public reader service for sites that block servers.
+    let html = clientHtml, finalUrl = target.toString(), via = clientHtml ? "browser" : "direct", lastErr = "";
+    if (!clientHtml) try {
       const page = await fetchSafe(target.toString(), "text/html,application/xhtml+xml", 5e6);
       if (page.status < 400) { html = new TextDecoder().decode(page.buf); finalUrl = page.url; } else lastErr = "status " + page.status;
     } catch (e) { lastErr = String((e as Error)?.message || e); }
 
-    let shop: Record<string, unknown> | null = null;
+    let shop: Record<string, unknown> | null = clientShop;
     const fu = new URL(finalUrl);
-    if (/\/products\/[^/]+/.test(fu.pathname)) {
+    if (!clientHtml && /\/products\/[^/]+/.test(fu.pathname)) {
       const p = fu.pathname.replace(/\/$/, "");
       try {
         const r = await fetchSafe(fu.origin + p + ".json", "application/json", 3e6);
@@ -92,7 +97,10 @@ Deno.serve(async (req) => {
     const saved: string[] = [];
     const folder = uid || (isAdmin && /^[0-9a-f-]{36}$/.test(String(body.folder || "")) ? String(body.folder) : "seed");
     // Admin calls may name the exact photos to store (for example a product gallery read separately).
-    const sources: string[] = isAdmin && Array.isArray(body.image_urls) ? body.image_urls.map(String) : info.images;
+    const ukey = (u: string) => u.replace(/^https?:/, "").split("?")[0];
+    const merged = shop ? info.images : info.familyFound ? info.images.concat(clientImgs) : clientImgs.concat(info.images);
+    const sources: string[] = isAdmin && Array.isArray(body.image_urls) ? body.image_urls.map(String)
+      : merged.filter((u, i, a) => a.findIndex((v) => ukey(v) === ukey(u)) === i);
     for (const src of sources.slice(0, want * 2)) {
       if (saved.length >= want) break;
       try {

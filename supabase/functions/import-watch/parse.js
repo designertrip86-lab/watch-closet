@@ -74,6 +74,41 @@ function colorOf(title, text) {
 }
 const CAL = /\b(ETA[\s-]?\d{4}(?:-\d)?|Sellita\s?SW\s?\d{3}(?:-\d)?|SW\s?\d{3}(?:-\d)?|Miyota\s?\w{4}|Seiko\s?NH\d{2}A?|NH\d{2}A?|Powermatic\s?80(?:\.\d{3})?|Soprod\s?\w{3,6}|La\s?Joux[\s-]Perret\s?\w{2,6}|L\d{3}(?:\.\d)?|MT\d{4}|H-\d{2}|Cal(?:iber|ibre)?\.?\s?[A-Z]?\d{2,5}[A-Z]?(?:[.-]\d+)?)\b/i;
 
+const BRANDS = ["A. Lange & Söhne","Audemars Piguet","Patek Philippe","Vacheron Constantin","Jaeger-LeCoultre","Grand Seiko","Glashütte Original","Frederique Constant","Baume & Mercier","Christopher Ward","Nivada Grenchen","Kiwame Tokyo","Ulysse Nardin","Girard-Perregaux","Maurice Lacroix","Raymond Weil","Louis Erard","Speake-Marin","Bell & Ross","TAG Heuer","Montblanc","Rolex","Tudor","Omega","Longines","Tissot","Hamilton","Seiko","Citizen","Orient","Casio","G-Shock","Breitling","IWC","Panerai","Cartier","Zenith","Hublot","Rado","Mido","Certina","Oris","Movado","Bulova","Nomos","Junghans","Sinn","Doxa","Baltic","Farer","Formex","Norqain","Corum","Concord","Luminox","Swatch","Fossil","Timex","Chopard","Breguet","Blancpain","Bremont","Ball","Victorinox","Alpina","Edox","CVSTOS","Seagull","Squale","Furlan Marri","Studio Underd0g","Lorier","Serica","Yema","Lip","Zodiac","Glycine","Fortis","Laco","Stowa","Damasko","Mühle Glashütte","Ressence","MB&F","H. Moser & Cie","Czapek","Bovet","Parmigiani Fleurier","Arnold & Son","Carl F. Bucherer","Eterna","Enicar","Universal Genève","Favre-Leuba","Titoni","Ernest Borel","Philip Stein","Michel Herbelin","Pequignet","Venezianico","Unimatic","Anordain","Halios","Monta","Brew","Vaer","Traska","Marloe","Dan Henry","Sternglas","Orient Star","Credor","Minase","Kurono Tokyo","Naoya Hida","Atelier Wen","Ming","Toledano & Chan","Habring²","Laurent Ferrier"];
+function brandIn(text) {
+  if (!text) return "";
+  const t = " " + text.toLowerCase() + " ";
+  let best = "";
+  for (const b of BRANDS) {
+    const k = b.toLowerCase();
+    const i = t.indexOf(k);
+    if (i >= 0 && !/[a-z0-9]/.test(t[i - 1] || " ") && !/[a-z0-9]/.test(t[i + k.length] || " ") && k.length > best.length) best = b;
+  }
+  return best;
+}
+function brandLast(text) {
+  if (!text) return "";
+  const t = text.toLowerCase();
+  let best = "", at = -1;
+  for (const b of BRANDS) {
+    const k = b.toLowerCase();
+    let i = t.lastIndexOf(k);
+    while (i >= 0 && (/[a-z0-9]/.test(t[i - 1] || " ") || /[a-z0-9]/.test(t[i + k.length] || " "))) i = t.lastIndexOf(k, i - 1);
+    if (i > at || (i === at && i >= 0 && k.length > best.length)) { at = i; best = b; }
+  }
+  return at >= 0 ? best : "";
+}
+const CUR = "(?:KWD|KD|K\\.D\\.?|د\\.ك|دينار(?:\\s*كويتي)?)";
+const AMT = "(\\d{1,3}(?:,\\d{3})+(?:\\.\\d{1,3})?|\\d+(?:\\.\\d{1,3})?)";
+function kwdIn(text) {
+  const a = new RegExp(CUR + "\\s*" + AMT, "i").exec(text), b = new RegExp(AMT + "\\s*" + CUR, "i").exec(text);
+  const m = [a, b].filter(Boolean).sort((x, y) => x.index - y.index)[0];
+  if (!m) return null;
+  const v = parseFloat(m[1].replace(/,/g, ""));
+  return v > 0 && v < 1e6 ? v : null;
+}
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 export function parsePage(html, url, shop) {
   const ld = ldProducts(html)[0] || null;
   const offers = ld ? [].concat(ld.offers || [])[0] || null : null;
@@ -81,16 +116,23 @@ export function parsePage(html, url, shop) {
   const title = (shop && shop.title) || (ld && ld.name) || meta(html, "og:title") || pageTitle.split(/\s[|–-]\s/)[0] || "";
   let brand = (shop && shop.vendor) || (ld && (typeof ld.brand === "string" ? ld.brand : ld.brand && ld.brand.name)) || meta(html, "product:brand") || meta(html, "og:brand") || "";
   brand = decode(brand).trim();
+  if (!brand || brand.length > 40) brand = brandIn(title) || "";
   const desc = toText((shop && shop.body_html) || (ld && ld.description) || meta(html, "og:description") || "");
   const body = toText((/<body[^>]*>([\s\S]*)<\/body>/i.exec(html) || [, html])[1]).slice(0, 60000);
   const T = [desc, body];
-  let model = decode(title).trim();
+  // Text right around the product title (store pages often print brand, reference and price there).
+  const tt = decode(title).trim();
+  const near = [];
+  if (tt.length >= 4) { let i = -1, n = 0; while ((i = body.indexOf(tt, i + 1)) >= 0 && n < 6) { const st = Math.max(0, i - 200); near.push({ before: body.slice(st, i), after: body.slice(i, i + 500) }); n++; } }
+  if (!brand) brand = near.map((w) => brandLast(w.before)).find(Boolean) || "";
+  let model = tt;
   if (brand && model.toLowerCase().startsWith(brand.toLowerCase())) model = model.slice(brand.length).replace(/^[\s\-–|:]+/, "");
 
   const caseMm = first([title, desc, body], [
     new RegExp("(?:case\\s*(?:diameter|size|width)|diameter|قطر(?:\\s*العلبة)?|حجم\\s*العلبة)[^\\d]{0,25}(\\d{2}(?:[.,]\\d{1,2})?)\\s*" + MM, "i"),
     new RegExp("(\\d{2}(?:[.,]\\d{1,2})?)\\s*" + MM + "\\s*(?:case|diameter|wide)", "i"),
-  ], 20, 55) ?? first([title], [new RegExp("(\\d{2}(?:[.,]\\d)?)\\s*" + MM, "i")], 20, 55);
+  ], 20, 55) ?? first([title], [new RegExp("(\\d{2}(?:[.,]\\d)?)\\s*" + MM, "i")], 20, 55)
+    ?? first(T, [/(?:dial\s*size|case\s*size|case\s*diameter|watch\s*size|diameter|حجم\s*العلبة|حجم\s*المينا|القطر)[^\d]{0,15}(\d{2}(?:[.,]\d{1,2})?)(?![\d])/i], 25, 50);
   const thickMm = first(T, [new RegExp("(?:thickness|case\\s*height|height|سماكة|السماكة|سمك)[^\\d]{0,25}(\\d{1,2}(?:[.,]\\d{1,2})?)\\s*" + MM, "i")], 4, 25);
   const lugToLugMm = first(T, [new RegExp("lug[\\s-]*to[\\s-]*lug[^\\d]{0,25}(\\d{2}(?:[.,]\\d{1,2})?)", "i")], 30, 65);
   const lugMm = first(T, [new RegExp("(?:lug\\s*width|strap\\s*width|band\\s*width|bracelet\\s*width|between\\s*(?:the\\s*)?lugs|عرض\\s*(?:ال)?سير|عرض\\s*(?:ال)?حزام)[^\\d]{0,25}(\\d{2})", "i")], 10, 30);
@@ -114,7 +156,8 @@ export function parsePage(html, url, shop) {
 
   let ref = String((ld && (ld.mpn || ld.sku)) || "").trim();
   if (!/\d/.test(ref) || ref.length < 4 || ref.length > 26) ref = "";
-  if (!ref) { const m = /(?:reference|ref\.?|model\s*(?:no\.?|number)|المرجع|الرقم\s*المرجعي)\s*[:#]?\s*([A-Z0-9][A-Z0-9.\-\/]{3,24})/i.exec(all); if (m && /\d/.test(m[1])) ref = m[1]; }
+  if (!ref) { const m = /(?:reference|ref\.?|model\s*(?:no\.?|number)|sku|product\s*(?:code|no\.?)?|المرجع|الرقم\s*المرجعي)\s*[:#]?\s*([A-Z0-9][A-Z0-9.\-\/]{3,24})/i.exec(all); if (m && /\d/.test(m[1]) && /[A-Z]|\./i.test(m[1])) ref = m[1]; }
+  if (!ref) for (const w of near) { const m = /\b([A-Z]{1,4}\d[0-9A-Z.\-\/]{4,20})\b/.exec(w.before); if (m) { ref = m[1]; break; } }
 
   const hay = (title + " " + desc).toLowerCase();
   const category = /div(?:e|er|ing)\b|غوص|غواص/.test(hay) ? "diver" : /pilot|flieger|aviat|طيار/.test(hay) ? "pilot" : /dress|رسمي/.test(hay) ? "dress" : /chrono|sport|رياضي|gmt/.test(hay) ? "sport" : null;
@@ -125,6 +168,10 @@ export function parsePage(html, url, shop) {
   if (price === null) price = num(meta(html, "product:price:amount") || meta(html, "og:price:amount") || "");
   currency = (offers && offers.priceCurrency) || meta(html, "product:price:currency") || meta(html, "og:price:currency") ||
     ((/Shopify\.currency\s*=\s*\{\s*"active"\s*:\s*"([A-Z]{3})"/.exec(html) || [])[1]) || null;
+  if (price === null) { for (const w of near) { const v = kwdIn(w.after); if (v !== null) { price = v; currency = "KWD"; break; } } }
+  if (price === null && !near.length) { const v = kwdIn(body); if (v !== null) { price = v; currency = "KWD"; } }
+  if (!available && available !== false && /out\s*of\s*stock|sold\s*out|نفذت\s*الكمية|غير\s*متوفر/i.test(near.map((w) => w.after).join(" ").slice(0, 3000))) available = false;
+  else if (available === null && /in\s*stock|متوفر/i.test(near.map((w) => w.after).join(" ").slice(0, 3000))) available = true;
   if (shop && typeof shop._available === "boolean") available = shop._available;
   else if (offers && offers.availability) available = !/OutOfStock|SoldOut|Discontinued/i.test(String(offers.availability));
 
@@ -141,8 +188,30 @@ export function parsePage(html, url, shop) {
     } catch { return null; }
   }).filter((s) => { if (!s) return false; const k = s.replace(/^https?:/, "").split("?")[0]; if (seen.has(k)) return false; seen.add(k); return true; });
 
+  // Photo family: stores often name gallery files after the main photo (4624.webp, 4624-1.webp, 4624-2.webp …).
+  let familyFound = false;
+  const ogi = imgList(meta(html, "og:image"))[0];
+  if (ogi && !(shop && shop.images && shop.images.length > 1)) {
+    try {
+      const ou = new URL(ogi.startsWith("//") ? "https:" + ogi : ogi, url);
+      const file = ou.pathname.split("/").pop() || "";
+      const fm = /^(.+?)(?:[-_]\d{1,2})?\.(webp|jpe?g|png|avif)$/i.exec(file);
+      if (fm && /\d/.test(fm[1]) && fm[1].length >= 3) {
+        const dir = ou.origin + ou.pathname.slice(0, ou.pathname.length - file.length);
+        const fam = [];
+        const re = new RegExp("[\"'(\\s,]([^\"'()\\s,]*/" + escRe(fm[1]) + "(?:[-_]\\d{1,2})?\\.(?:webp|jpe?g|png|avif))", "gi");
+        let m;
+        while ((m = re.exec(html)) && fam.length < 12) { try { const u = new URL(decode(m[1]).replace(/^\/\//, "https://"), url).href; if (!fam.includes(u)) fam.push(u); } catch { /* skip */ } }
+        for (let n = 1; n <= 6; n++) { const u = dir + fm[1] + "-" + n + "." + fm[2]; if (!fam.some((x) => x.split("?")[0] === u)) fam.push(u); }
+        const main = dir + fm[1] + "." + fm[2];
+        fam.sort((a, b) => (a.split("?")[0] === main ? -1 : b.split("?")[0] === main ? 1 : 0));
+        images = fam.concat(images).filter((x, i, arr) => arr.findIndex((y) => y.replace(/^https?:/, "").split("?")[0] === x.replace(/^https?:/, "").split("?")[0]) === i);
+        familyFound = true;
+      }
+    } catch { /* no family */ }
+  }
   // Pages read through the reader service often lack structured image lists; fall back to gallery images in the page.
-  if (images.length < 3) {
+  if (images.length < 3 && !familyFound) {
     const re = /<img[^>]+(?:data-src|src)=["']([^"']+)["']/gi;
     let m;
     while ((m = re.exec(html)) && images.length < 8) {
@@ -158,6 +227,6 @@ export function parsePage(html, url, shop) {
   return {
     title: decode(title).trim(), brand, model, ref, category, dialColor: colorOf(title, desc + "\n" + body.slice(0, 20000)), caseMm, thickMm, lugToLugMm, lugMm, waterM, powerH,
     movement, crystal, date, price, currency, available, images, description: desc.slice(0, 600),
-    siteName: meta(html, "og:site_name") || null,
+    siteName: meta(html, "og:site_name") || null, familyFound,
   };
 }
