@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
 
     const want = Math.max(0, Math.min(Number(body.max_images ?? 6), 10));
     const saved: string[] = [];
-    const folder = uid || "seed";
+    const folder = uid || (isAdmin && /^[0-9a-f-]{36}$/.test(String(body.folder || "")) ? String(body.folder) : "seed");
     // Admin calls may name the exact photos to store (for example a product gallery read separately).
     const sources: string[] = isAdmin && Array.isArray(body.image_urls) ? body.image_urls.map(String) : info.images;
     for (const src of sources.slice(0, want * 2)) {
