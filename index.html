@@ -218,7 +218,7 @@ function siteName(u){var m=/^https?:\/\/([^\/?#]+)/i.exec(u||"");if(!m)return ""
 function imgs(w){return w&&Array.isArray(w.images)&&w.images.length?w.images:(w&&w.imageId?[w.imageId]:[]);}
 function picture(w,px,ix){var L=imgs(w);if(L.length)return '<img src="'+esc(src(L[ix||0]||L[0]))+'" alt="'+esc((w.brand||"")+" "+(w.model||""))+'" data-fallback="'+esc(w.id)+'">';return dial(w,px);}
 
-function renderTabs(){$("tabs").innerHTML=TABS.map(function(t){return '<button class="tab" role="tab" aria-selected="'+(S.tab===t[0])+'" data-act="tab" data-v="'+t[0]+'">'+t[1]+'</button>';}).join("");
+function renderTabs(){$("tabs").innerHTML=!S.user?"":TABS.map(function(t){return '<button class="tab" role="tab" aria-selected="'+(S.tab===t[0])+'" data-act="tab" data-v="'+t[0]+'">'+t[1]+'</button>';}).join("");
   $("addBtn").hidden=!S.canWrite;$("quick").hidden=!S.canWrite;$("outBtn").hidden=!S.user;var qb=$("quickBtn");qb.disabled=!!S.importing;qb.textContent=S.importing?"يقرأ الرابط…":"أضف من رابط";}
 var CATKEYS=["pilot","dress","sport","diver","daily"];
 /* Link import: the import-watch service opens the page, reads the specs and saves the photos. */
