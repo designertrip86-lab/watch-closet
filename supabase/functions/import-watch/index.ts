@@ -85,7 +85,7 @@ Deno.serve(async (req) => {
         if (r.ok) { html = await r.text(); via = "reader"; } else lastErr += " | reader " + r.status;
       } catch (e) { lastErr += " | reader " + String((e as Error)?.message || e); }
     }
-    if (!html && !shop) return json({ error: "blocked", detail: lastErr }, 502);
+    if (!html && !shop && !(isAdmin && Array.isArray(body.image_urls))) return json({ error: "blocked", detail: lastErr }, 502);
     const info = parsePage(html, finalUrl, shop) as Record<string, unknown> & { images: string[] };
 
     const want = Math.max(0, Math.min(Number(body.max_images ?? 6), 10));
