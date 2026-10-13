@@ -91,7 +91,9 @@ Deno.serve(async (req) => {
     const want = Math.max(0, Math.min(Number(body.max_images ?? 6), 10));
     const saved: string[] = [];
     const folder = uid || "seed";
-    for (const src of info.images.slice(0, want * 2)) {
+    // Admin calls may name the exact photos to store (for example a product gallery read separately).
+    const sources: string[] = isAdmin && Array.isArray(body.image_urls) ? body.image_urls.map(String) : info.images;
+    for (const src of sources.slice(0, want * 2)) {
       if (saved.length >= want) break;
       try {
         let r = await fetchSafe(src, "image/avif,image/webp,image/png,image/jpeg,image/*", 9e6).catch(() => null);
@@ -112,7 +114,7 @@ Deno.serve(async (req) => {
       const { data: row } = await admin.from("watches").select("data").eq("id", String(body.watch_id)).single();
       if (row) {
         const d = (row.data || {}) as Record<string, unknown>;
-        const images = ([] as string[]).concat((d.images as string[]) || [], saved).slice(0, 12);
+        const images = (body.replace_images ? saved : ([] as string[]).concat((d.images as string[]) || [], saved)).slice(0, 12);
         await admin.from("watches").update({ data: { ...d, images, imageId: images[0] || null } }).eq("id", String(body.watch_id));
       }
     }
