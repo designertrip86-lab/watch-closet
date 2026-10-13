@@ -56,14 +56,15 @@ Deno.serve(async (req) => {
     const target = safeUrl(String(body.url || ""));
     if (!target) return json({ error: "bad_url" }, 400);
 
-    let page;
-    try { page = await fetchSafe(target.toString(), "text/html,application/xhtml+xml", 5e6); }
-    catch (e) { return json({ error: "fetch_failed", detail: String((e as Error)?.message || e) }, 502); }
-    if (page.status >= 400) return json({ error: "blocked", status: page.status }, 502);
-    const html = new TextDecoder().decode(page.buf);
+    // 1) the page itself, 2) Shopify's product JSON, 3) a public reader service for sites that block servers.
+    let html = "", finalUrl = target.toString(), via = "direct", lastErr = "";
+    try {
+      const page = await fetchSafe(target.toString(), "text/html,application/xhtml+xml", 5e6);
+      if (page.status < 400) { html = new TextDecoder().decode(page.buf); finalUrl = page.url; } else lastErr = "status " + page.status;
+    } catch (e) { lastErr = String((e as Error)?.message || e); }
 
     let shop: Record<string, unknown> | null = null;
-    const fu = new URL(page.url);
+    const fu = new URL(finalUrl);
     if (/\/products\/[^/]+/.test(fu.pathname)) {
       const p = fu.pathname.replace(/\/$/, "");
       try {
@@ -77,7 +78,14 @@ Deno.serve(async (req) => {
         } catch { /* availability unknown */ }
       }
     }
-    const info = parsePage(html, page.url, shop) as Record<string, unknown> & { images: string[] };
+    if (!html && !shop) {
+      try {
+        const r = await fetch("https://r.jina.ai/" + target.toString(), { headers: { "X-Return-Format": "html", Accept: "text/html" }, signal: AbortSignal.timeout(40000) });
+        if (r.ok) { html = await r.text(); via = "reader"; } else lastErr += " | reader " + r.status;
+      } catch (e) { lastErr += " | reader " + String((e as Error)?.message || e); }
+    }
+    if (!html && !shop) return json({ error: "blocked", detail: lastErr }, 502);
+    const info = parsePage(html, finalUrl, shop) as Record<string, unknown> & { images: string[] };
 
     const want = Math.max(0, Math.min(Number(body.max_images ?? 6), 10));
     const saved: string[] = [];
@@ -85,7 +93,8 @@ Deno.serve(async (req) => {
     for (const src of info.images.slice(0, want * 2)) {
       if (saved.length >= want) break;
       try {
-        const r = await fetchSafe(src, "image/avif,image/webp,image/png,image/jpeg,image/*", 9e6);
+        let r = await fetchSafe(src, "image/avif,image/webp,image/png,image/jpeg,image/*", 9e6).catch(() => null);
+        if (!r || r.status !== 200) r = await fetchSafe("https://wsrv.nl/?url=" + encodeURIComponent(src), "image/*", 9e6);
         const ct = (r.type.split(";")[0] || "").trim().toLowerCase();
         if (r.status !== 200 || !/^image\/(jpeg|png|webp|gif|avif)$/.test(ct)) continue;
         const path = `${folder}/${crypto.randomUUID()}.${ct.split("/")[1].replace("jpeg", "jpg")}`;
@@ -95,7 +104,8 @@ Deno.serve(async (req) => {
       } catch { /* skip this image */ }
     }
     info.savedImages = saved;
-    info.finalUrl = page.url;
+    info.finalUrl = finalUrl;
+    info.via = via;
 
     if (isAdmin && body.watch_id) {
       const { data: row } = await admin.from("watches").select("data").eq("id", String(body.watch_id)).single();

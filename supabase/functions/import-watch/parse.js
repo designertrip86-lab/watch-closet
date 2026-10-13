@@ -135,10 +135,11 @@ export function parsePage(html, url, shop) {
   images = images.map((s) => {
     try {
       const u = new URL(s.startsWith("//") ? "https:" + s : s, url);
+      if (u.protocol === "http:") u.protocol = "https:";
       if (/\/cdn\/shop\/|cdn\.shopify\.com/.test(u.href)) u.searchParams.set("width", "1400");
       return u.href;
     } catch { return null; }
-  }).filter((s) => { if (!s) return false; const k = s.split("?")[0]; if (seen.has(k)) return false; seen.add(k); return true; });
+  }).filter((s) => { if (!s) return false; const k = s.replace(/^https?:/, "").split("?")[0]; if (seen.has(k)) return false; seen.add(k); return true; });
 
   return {
     title: decode(title).trim(), brand, model, ref, category, dialColor: colorOf(title, desc + "\n" + body.slice(0, 20000)), caseMm, thickMm, lugToLugMm, lugMm, waterM, powerH,
