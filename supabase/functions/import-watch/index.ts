@@ -1,6 +1,6 @@
 // Reads a watch product page, extracts specs, and stores its photos in Supabase Storage.
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
-import { parsePage } from "./parse.js";
+import { parsePage } from "./parse.js"; // deployed copy imports the same file from jsDelivr, pinned to a commit
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -80,7 +80,8 @@ Deno.serve(async (req) => {
     }
     if (!html && !shop) {
       try {
-        const r = await fetch("https://r.jina.ai/" + target.toString(), { headers: { "X-Return-Format": "html", Accept: "text/html" }, signal: AbortSignal.timeout(40000) });
+        const key = Deno.env.get("JINA_API_KEY");
+        const r = await fetch("https://r.jina.ai/" + target.toString(), { headers: { "X-Return-Format": "html", Accept: "text/html", ...(key ? { Authorization: "Bearer " + key } : {}) }, signal: AbortSignal.timeout(40000) });
         if (r.ok) { html = await r.text(); via = "reader"; } else lastErr += " | reader " + r.status;
       } catch (e) { lastErr += " | reader " + String((e as Error)?.message || e); }
     }

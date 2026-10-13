@@ -141,6 +141,20 @@ export function parsePage(html, url, shop) {
     } catch { return null; }
   }).filter((s) => { if (!s) return false; const k = s.replace(/^https?:/, "").split("?")[0]; if (seen.has(k)) return false; seen.add(k); return true; });
 
+  // Pages read through the reader service often lack structured image lists; fall back to gallery images in the page.
+  if (images.length < 3) {
+    const re = /<img[^>]+(?:data-src|src)=["']([^"']+)["']/gi;
+    let m;
+    while ((m = re.exec(html)) && images.length < 8) {
+      if (!/\/cdn\/shop\/(?:files|products)\/|\/product[s-]?(?:images|pictures)?\//i.test(m[1]) || /logo|icon|badge|payment|flag/i.test(m[1])) continue;
+      try {
+        const u = new URL(decode(m[1]).startsWith("//") ? "https:" + decode(m[1]) : decode(m[1]), url);
+        if (/\/cdn\/shop\/|cdn\.shopify\.com/.test(u.href)) u.searchParams.set("width", "1400");
+        const k = u.href.replace(/^https?:/, "").split("?")[0];
+        if (!seen.has(k)) { seen.add(k); images.push(u.href); }
+      } catch { /* skip */ }
+    }
+  }
   return {
     title: decode(title).trim(), brand, model, ref, category, dialColor: colorOf(title, desc + "\n" + body.slice(0, 20000)), caseMm, thickMm, lugToLugMm, lugMm, waterM, powerH,
     movement, crystal, date, price, currency, available, images, description: desc.slice(0, 600),
